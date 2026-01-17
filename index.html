@@ -858,14 +858,14 @@
         </div>
     </div>
 
-    <!-- Excel Generated Modal -->
-    <div id="excelModal" class="modal">
+    <!-- Completion Modal -->
+    <div id="completionModal" class="modal">
         <div class="modal-content">
             <h2 class="modal-title">Simulation Completed</h2>
-            <p class="modal-message">Excel file has been generated, saved to admin folder, and sent to your email (yovelyos@post.bgu.ac.il).</p>
+            <p class="modal-message">Excel file generated and saved successfully. Returning to start screen...</p>
 
             <div class="modal-buttons">
-                <button class="modal-btn-confirm" onclick="returnToStart()" style="background: var(--color-primary);">Start New Simulation</button>
+                <button class="modal-btn-confirm" onclick="returnToStart()">Return to Start</button>
             </div>
         </div>
     </div>
@@ -969,7 +969,6 @@
 
         let adminLoggedIn = false;
         let timerInterval = null;
-        let generatedExcelBlob = null;
         let deleteTargetId = null;
 
         // Load actions from storage
@@ -1028,7 +1027,6 @@
             currentState.startTime = Date.now();
             currentState.actionTimes = [];
             currentState.actions = getActions(role, arrestType);
-            generatedExcelBlob = null;
 
             setTimeout(() => {
                 renderTimerScreen();
@@ -1096,11 +1094,11 @@
         // End simulation and generate Excel
         function endSimulation() {
             if (timerInterval) clearInterval(timerInterval);
-            generateExcel();
+            generateExcelAndSave();
         }
 
-        // Generate Excel file and auto-send email
-        function generateExcel() {
+        // Generate Excel file and save to admin panel
+        function generateExcelAndSave() {
             try {
                 const now = new Date();
                 
@@ -1137,11 +1135,11 @@
                 // Save to localStorage for admin access
                 saveCompletedSimulation();
 
-                // Auto-send email and show modal
-                autoSendEmailReport();
+                // Show completion modal
+                showCompletionModal();
             } catch (error) {
                 console.error('Error generating Excel:', error);
-                showCompletionModal();
+                alert('Error generating Excel file');
             }
         }
 
@@ -1162,80 +1160,19 @@
 
                 completedSims.push(simRecord);
                 localStorage.setItem('completedSimulations', JSON.stringify(completedSims));
-                console.log('Simulation saved:', simRecord);
+                console.log('Simulation saved to admin panel:', simRecord);
             } catch (error) {
                 console.error('Error saving simulation:', error);
             }
         }
 
-        // Auto-send email to your address
-        function autoSendEmailReport() {
-            const email = 'yovelyos@post.bgu.ac.il';
-            const now = new Date();
-            
-            // Prepare data for email
-            const data = [
-                ['Simulation Number', currentState.simulationNumber],
-                ['Role', currentState.role === 'emergencyphysician' ? 'Emergency Physician' : `Nurse-Led ${currentState.arrestType === 'vfpvt' ? 'VF/pVT' : 'Asystole/PEA'}`],
-                ['Arrest Type', currentState.arrestType ? (currentState.arrestType === 'vfpvt' ? 'VF/pVT' : 'Asystole/PEA') : 'N/A'],
-                ['Date', now.toLocaleDateString() + ' ' + now.toLocaleTimeString()],
-                [],
-                ['Action', 'Time (MM:SS)']
-            ];
-
-            currentState.actions.forEach((action, index) => {
-                const timeStr = currentState.actionTimes[index] || '--:--';
-                data.push([action, timeStr]);
-            });
-
-            // Create Excel blob
-            const ws = XLSX.utils.aoa_to_sheet(data);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Simulation Data');
-            ws['!cols'] = [{ wch: 30 }, { wch: 15 }];
-
-            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-            const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-
-            // Send via FormSpree
-            sendExcelByEmail(email, blob);
-        }
-
-        // Send Excel by email via FormSpree
-        function sendExcelByEmail(email, excelBlob) {
-            const formData = new FormData();
-            formData.append('email', email);
-            formData.append('excel', excelBlob, `CPRSimulation_${currentState.simulationNumber}.xlsx`);
-            formData.append('simulationNumber', currentState.simulationNumber);
-            formData.append('role', currentState.role);
-            formData.append('message', `New CPR Simulation completed: ${currentState.simulationNumber}`);
-
-            fetch('https://formspree.io/f/xzbjbpqd', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                console.log('Email response status:', response.status);
-                showCompletionModal();
-            })
-            .catch(error => {
-                console.error('Email error:', error);
-                showCompletionModal();
-            });
-        }
-
         // Show completion modal
         function showCompletionModal() {
             try {
-                const modal = document.getElementById('excelModal');
+                const modal = document.getElementById('completionModal');
                 if (modal) {
                     modal.classList.add('active');
                     console.log('Completion modal displayed');
-                    
-                    // Auto-return to start after 3 seconds
-                    setTimeout(() => {
-                        returnToStart();
-                    }, 3000);
                 }
             } catch (error) {
                 console.error('Error showing modal:', error);
@@ -1244,8 +1181,7 @@
 
         // Return to start
         function returnToStart() {
-            document.getElementById('excelModal').classList.remove('active');
-            if (timerInterval) clearInterval(timerInterval);
+            document.getElementById('completionModal').classList.remove('active');
             switchScreen('startScreen');
             document.getElementById('roleSelect').value = '';
             document.getElementById('arrestTypeSelect').value = '';
