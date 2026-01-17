@@ -2,11 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>CPR Simulation Timer</title>
+    <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore-compat.js"></script>
     <style>
         :root {
             --color-primary: #208491;
@@ -74,7 +76,7 @@
         .admin-content { display: none; }
         .admin-content.active { display: block; }
 
-        .admin-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--color-border); }
+        .admin-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--color-border); flex-wrap: wrap; }
         .admin-tab { padding: 10px 15px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--color-text-secondary); border-bottom: 3px solid transparent; }
         .admin-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
 
@@ -89,7 +91,7 @@
         .add-action input { flex: 1; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px; }
         .add-action button { padding: 8px 16px; background: var(--color-primary); color: #ffffff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
 
-        .simulations-list { margin-top: 20px; }
+        .simulations-list { margin-top: 20px; max-height: 600px; overflow-y: auto; }
         .simulation-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9f9f7; border-radius: 4px; margin-bottom: 10px; border-left: 4px solid var(--color-primary); }
         .simulation-info { flex: 1; }
         .simulation-info-row { font-size: 13px; margin: 4px 0; }
@@ -112,6 +114,8 @@
         .modal-btn-confirm { background: var(--color-primary); color: #ffffff; }
         .modal-btn-confirm:hover { background: var(--color-primary-hover); }
         .modal-btn-cancel { background: #f5f5f5; color: var(--color-text); border: 1px solid var(--color-border); }
+
+        .loading { text-align: center; color: var(--color-text-secondary); padding: 20px; }
 
         @media (max-width: 768px) {
             body { padding: 10px; }
@@ -267,7 +271,7 @@
     <div id="completionModal" class="modal">
         <div class="modal-content">
             <h2 class="modal-title">Simulation Completed</h2>
-            <p class="modal-message">Simulation saved successfully to admin panel!</p>
+            <p class="modal-message">Simulation saved to Firebase and CSV downloaded!</p>
             <div class="modal-buttons">
                 <button class="modal-btn-confirm" onclick="returnToStart()">Return to Start</button>
             </div>
@@ -287,6 +291,20 @@
     </div>
 
     <script>
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDaztu3wCMurx0vm7sCzY0YNwAlCwLbUEg",
+            authDomain: "nurse-led-simulations.firebaseapp.com",
+            projectId: "nurse-led-simulations",
+            storageBucket: "nurse-led-simulations.firebasestorage.app",
+            messagingSenderId: "898568404799",
+            appId: "1:898568404799:web:bd383b026f469d96809d8a"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
         const defaultActions = {
             emergencyphysician: [
                 'Start chest compressions',
@@ -463,23 +481,20 @@
 
         function endSimulation() {
             if (timerInterval) clearInterval(timerInterval);
-            saveSimulation();
+            saveToFirebase();
             downloadCSV();
             showCompletionModal();
         }
 
-        function saveSimulation() {
-            const sims = JSON.parse(localStorage.getItem('completedSimulations') || '[]');
-            sims.push({
-                id: Date.now(),
+        function saveToFirebase() {
+            db.collection('simulations').add({
                 simulationNumber: currentState.simulationNumber,
                 role: currentState.role,
                 arrestType: currentState.arrestType,
-                date: new Date().toISOString(),
+                date: new Date(),
                 actions: currentState.actions,
                 times: currentState.actionTimes
-            });
-            localStorage.setItem('completedSimulations', JSON.stringify(sims));
+            }).catch(error => console.error('Firebase error:', error));
         }
 
         function downloadCSV() {
@@ -575,40 +590,45 @@
         }
 
         function loadCompletedSimulations() {
-            const sims = JSON.parse(localStorage.getItem('completedSimulations') || '[]');
             const container = document.getElementById('completedSimsList');
-            container.innerHTML = '';
+            container.innerHTML = '<div class="loading">Loading simulations from Firebase...</div>';
 
-            if (sims.length === 0) {
-                container.innerHTML = '<p style="color: var(--color-text-secondary);">No completed simulations yet.</p>';
-                return;
-            }
+            db.collection('simulations').orderBy('date', 'desc').get().then(querySnapshot => {
+                container.innerHTML = '';
+                if (querySnapshot.empty) {
+                    container.innerHTML = '<p style="color: var(--color-text-secondary);">No completed simulations yet.</p>';
+                    return;
+                }
 
-            sims.forEach((sim) => {
-                const item = document.createElement('div');
-                item.className = 'simulation-item';
-                item.innerHTML = `
-                    <div class="simulation-info">
-                        <div class="simulation-info-row"><span class="simulation-info-label">Simulation:</span> <strong>${sim.simulationNumber}</strong></div>
-                        <div class="simulation-info-row"><span class="simulation-info-label">Role:</span> ${sim.role === 'emergencyphysician' ? 'Emergency Physician' : `Nurse-Led ${sim.arrestType === 'vfpvt' ? 'VF/pVT' : 'Asystole/PEA'}`}</div>
-                        <div class="simulation-info-row"><span class="simulation-info-label">Date:</span> ${new Date(sim.date).toLocaleDateString()}</div>
-                    </div>
-                    <div class="simulation-actions">
-                        <button class="btn-download" onclick="downloadSimulationCSV(${sim.id})">Download CSV</button>
-                        <button class="btn-delete" onclick="showDeleteConfirm(${sim.id})">Delete</button>
-                    </div>
-                `;
-                container.appendChild(item);
+                querySnapshot.forEach(doc => {
+                    const sim = doc.data();
+                    const item = document.createElement('div');
+                    item.className = 'simulation-item';
+                    item.innerHTML = `
+                        <div class="simulation-info">
+                            <div class="simulation-info-row"><span class="simulation-info-label">Simulation:</span> <strong>${sim.simulationNumber}</strong></div>
+                            <div class="simulation-info-row"><span class="simulation-info-label">Role:</span> ${sim.role === 'emergencyphysician' ? 'Emergency Physician' : `Nurse-Led ${sim.arrestType === 'vfpvt' ? 'VF/pVT' : 'Asystole/PEA'}`}</div>
+                            <div class="simulation-info-row"><span class="simulation-info-label">Date:</span> ${sim.date.toDate().toLocaleDateString()}</div>
+                        </div>
+                        <div class="simulation-actions">
+                            <button class="btn-download" onclick="downloadSimulationCSV('${JSON.stringify(sim).replace(/"/g, '&quot;')}')">Download CSV</button>
+                            <button class="btn-delete" onclick="showDeleteConfirm('${doc.id}')">Delete</button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            }).catch(error => {
+                container.innerHTML = '<p style="color: var(--color-error);">Error loading simulations</p>';
+                console.error('Error:', error);
             });
         }
 
-        function downloadSimulationCSV(simId) {
-            const sims = JSON.parse(localStorage.getItem('completedSimulations') || '[]');
-            const sim = sims.find(s => s.id === simId);
-            if (!sim) return;
-
+        function downloadSimulationCSV(simData) {
+            const sim = JSON.parse(simData.replace(/&quot;/g, '"'));
+            const date = sim.date.toDate ? sim.date.toDate() : new Date(sim.date);
+            
             let csv = 'Simulation Number,Arrest Type,Date,Time\n';
-            csv += `"${sim.simulationNumber}","${sim.arrestType || 'N/A'}","${new Date(sim.date).toLocaleDateString()}","${new Date(sim.date).toLocaleTimeString()}"\n\n`;
+            csv += `"${sim.simulationNumber}","${sim.arrestType || 'N/A'}","${date.toLocaleDateString()}","${date.toLocaleTimeString()}"\n\n`;
             csv += 'Action,Time (MM:SS)\n';
 
             sim.actions.forEach((action, idx) => {
@@ -625,22 +645,23 @@
             window.URL.revokeObjectURL(url);
         }
 
-        function showDeleteConfirm(simId) {
-            deleteTargetId = simId;
+        let deleteTargetDocId = null;
+        function showDeleteConfirm(docId) {
+            deleteTargetDocId = docId;
             document.getElementById('deleteModal').classList.add('active');
         }
 
         function cancelDelete() {
-            deleteTargetId = null;
+            deleteTargetDocId = null;
             document.getElementById('deleteModal').classList.remove('active');
         }
 
         function confirmDelete() {
-            if (deleteTargetId === null) return;
-            const sims = JSON.parse(localStorage.getItem('completedSimulations') || '[]');
-            localStorage.setItem('completedSimulations', JSON.stringify(sims.filter(s => s.id !== deleteTargetId)));
-            document.getElementById('deleteModal').classList.remove('active');
-            loadCompletedSimulations();
+            if (!deleteTargetDocId) return;
+            db.collection('simulations').doc(deleteTargetDocId).delete().then(() => {
+                document.getElementById('deleteModal').classList.remove('active');
+                loadCompletedSimulations();
+            }).catch(error => console.error('Error deleting:', error));
         }
 
         function updateAction(key, idx, value) {
